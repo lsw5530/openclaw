@@ -1,3 +1,4 @@
+import type { Agent } from "node:https";
 import {
   DisconnectReason,
   fetchLatestBaileysVersion,
@@ -88,6 +89,25 @@ async function safeSaveCreds(
 }
 
 /**
+ * Build an HTTPS proxy agent from environment variables (https_proxy / http_proxy).
+ * Returns undefined when no proxy is configured.
+ */
+async function resolveProxyAgent(): Promise<Agent | undefined> {
+  const proxyUrl =
+    process.env.https_proxy ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.HTTP_PROXY;
+  if (!proxyUrl) return undefined;
+  try {
+    const { HttpsProxyAgent } = await import("https-proxy-agent");
+    return new HttpsProxyAgent(proxyUrl) as unknown as Agent;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Create a Baileys socket backed by the multi-file auth store we keep on disk.
  * Consumers can opt into QR printing for interactive login flows.
  */
@@ -109,6 +129,7 @@ export async function createWaSocket(
   maybeRestoreCredsFromBackup(authDir);
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const { version } = await fetchLatestBaileysVersion();
+  const proxyAgent = await resolveProxyAgent();
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
@@ -120,6 +141,7 @@ export async function createWaSocket(
     browser: ["openclaw", "cli", VERSION],
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    ...(proxyAgent ? { agent: proxyAgent, fetchAgent: proxyAgent } : {}),
   });
 
   sock.ev.on("creds.update", () => enqueueSaveCreds(authDir, saveCreds, sessionLogger));
